@@ -56,7 +56,7 @@ class Video:
 
         crop_x_end = None
         crop_y_end = None
-        if crop_x and crop_y and crop_width and crop_height:
+        if crop_x is not None and crop_y is not None and crop_width and crop_height:
             crop_x_end = crop_x + crop_width
             crop_y_end = crop_y + crop_height
 
@@ -114,6 +114,10 @@ class Video:
                     frame_index = i + ocr_start
                     frame_filename = f"frame_{frame_index}.jpg"
                     frame_path = os.path.join(temp_dir, frame_filename)
+
+                    # Try to improve detection
+                    frame = cv2.copyMakeBorder(frame, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
                     cv2.imwrite(frame_path, frame)
 
                     frame_paths.append(frame_path)
@@ -194,25 +198,28 @@ class Video:
             # Handle skipped frames (due to similarity threshold)
             if previous_index is not None and frame_index > previous_index + 1:
                 # We assume the skipped frames belong to the previous prediction
-                previous_pred.end_index = frame_index - 2
+                previous_pred.end_index = frame_index - (frames_to_skip + 1)
 
             previous_index = frame_index
             previous_pred = predicted_frames
 
+        if previous_pred.end_index < ocr_end:
+            previous_pred.end_index = ocr_end - 1
+
         # Cleanup
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def get_subtitles(self, sim_threshold: int) -> str:
-        self._generate_subtitles(sim_threshold)
+    def get_subtitles(self, sim_threshold: int, max_merge_gap_sec: float) -> str:
+        self._generate_subtitles(sim_threshold, max_merge_gap_sec)
         return ''.join(
             '{}\n{} --> {}\n{}\n\n'.format(
                 i,
                 utils.get_srt_timestamp(sub.index_start, self.fps),
-                utils.get_srt_timestamp(sub.index_end, self.fps),
+                utils.get_srt_timestamp(sub.index_end + 1, self.fps),
                 sub.text)
             for i, sub in enumerate(self.pred_subs, start=1))
 
-    def _generate_subtitles(self, sim_threshold: int) -> None:
+    def _generate_subtitles(self, sim_threshold: int, max_merge_gap_sec: float) -> None:
         print("Generating subtitles...", flush=True)
         self.pred_subs = []
 
@@ -234,5 +241,6 @@ class Video:
             ls = self.pred_subs[-1]
             del self.pred_subs[-1]
             sub = PredictedSubtitle(ls.frames + sub.frames, sub.sim_threshold)
+
 
         self.pred_subs.append(sub)

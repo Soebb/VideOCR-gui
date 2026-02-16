@@ -152,14 +152,23 @@ class Video:
             raise IOError(f"PaddleOCR executable not found at: {self.paddleocr_path}")
 
         # Run PaddleOCR
-        with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env, bufsize=1) as process:
-            # Parse results into {filename: [ocr lines]}
-            ocr_outputs = {}
-            current_image = None
-            total_images = len(frame_paths)
-            ocr_image_index = 0
-            for line in process.stdout:
+        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env, bufsize=1)
+
+        stdout_lines = []
+        stderr_lines = []
+
+        stderr_thread = threading.Thread(target=utils.read_pipe, args=(process.stderr, stderr_lines))
+        stderr_thread.start()
+
+        ocr_outputs = {}
+        current_image = None
+        total_images = len(frame_paths)
+        ocr_image_index = 0
+        try:
+            for line in iter(process.stdout.readline, ''):
+                stdout_lines.append(line)
                 line = line.strip()
+
                 if "ppocr INFO: **********" in line:
                     match = re.search(r"\*+(.+?)\*+$", line)
                     if match:
@@ -169,14 +178,12 @@ class Video:
                         print(f"\rStep 2: Performing OCR on image {ocr_image_index} of {total_images}", end="", flush=True)
                 elif current_image and '[[' in line:
                     try:
-                        # Extract only the OCR data after 'ppocr INFO:'
                         match = re.search(r"ppocr INFO:\s*(\[.+\])", line)
                         if match:
                             parsed = ast.literal_eval(match.group(1))
                             ocr_outputs[current_image].append(parsed)
                     except Exception as e:
-                        print(f"Error parsing OCR for {current_image}: {e}")
-
+                        print(f"Error parsing OCR for {current_image}: {e}", flush=True)
         print()
 
         # Map to predictedframes
